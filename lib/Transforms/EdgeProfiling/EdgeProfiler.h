@@ -5,7 +5,7 @@
  *      Author: raphael
  */
 
-
+#include <map>
 #include <strings.h>
 
 #include "llvm/Pass.h"
@@ -24,13 +24,23 @@ namespace llvm{
 
 	class EdgeProfiler: public ModulePass{
 	private:
-		Value *countVisitedBlock, *countVisitedEdge, *flushProfilingData;
+		Value *initBBandEdgeCounters, *flushProfilingData;
 		Value* moduleIdentifierStr;
+
+		GlobalVariable *BBCounter, *EdgeCounter;
+
+		BasicBlock *EntryBlock;
+
+		std::map<BasicBlock*, int> BBmap;
+		std::map<std::pair<BasicBlock*, BasicBlock*> , int> EdgeMap;
+
+
 	public:
 		static char ID;
 
-		EdgeProfiler() : ModulePass(ID), countVisitedBlock(NULL), countVisitedEdge(NULL),
-				         flushProfilingData(NULL), moduleIdentifierStr(NULL){};
+		EdgeProfiler() : ModulePass(ID), initBBandEdgeCounters(NULL),
+				         flushProfilingData(NULL), moduleIdentifierStr(NULL),
+				         BBCounter(NULL), EdgeCounter(NULL), EntryBlock(NULL){};
 		~EdgeProfiler() {};
 
 		bool runOnModule(Module &M);
@@ -42,6 +52,7 @@ namespace llvm{
 		void insertDeclarations(Module &M);
 		void printBasicBlocks(Module &M);
 		void printEdges(Module &M);
+		void insertInitInstrumentation(Module &M);
 		void insertEdgeInstrumentation(Module &M);
 		void insertExitPointInstrumentation(Module &M);
 

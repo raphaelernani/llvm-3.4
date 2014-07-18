@@ -9,8 +9,9 @@
 #define EXITINFO_H_
 
 #include "llvm/Pass.h"
-#include "llvm/IR/Module.h"
 #include "llvm/PassAnalysisSupport.h"
+#include "llvm/ADT/Statistic.h"
+#include "llvm/IR/Module.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/InstrTypes.h"

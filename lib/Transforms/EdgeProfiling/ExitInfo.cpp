@@ -5,7 +5,11 @@
  *      Author: raphael
  */
 
+#define DEBUG_TYPE "ExitInfo"
+
 #include "ExitInfo.h"
+
+STATISTIC(ExitPoints, "Number of exit points");
 
 using namespace llvm;
 
@@ -21,6 +25,9 @@ bool ExitInfo::runOnModule(Module &M) {
 
 	// get pointer to function exit
 	Function* exitF = M.getFunction("exit");
+
+	Function* _gfortran_stop_string = M.getFunction("_gfortran_stop_string");
+
 
 	FunctionType *AbortFTy = FunctionType::get(Type::getVoidTy(M.getContext()), false);
 	Value* abortF = M.getOrInsertFunction("abort", AbortFTy);
@@ -47,7 +54,9 @@ bool ExitInfo::runOnModule(Module &M) {
 
 						Function* calledfunction = CI->getCalledFunction();
 
-						if(calledfunction == exitF || calledfunction == abortF)  exitPoints.insert(CI);
+						if(calledfunction == exitF
+								|| calledfunction == abortF
+								|| calledfunction == _gfortran_stop_string)  exitPoints.insert(CI);
 
 					}
 
@@ -64,6 +73,8 @@ bool ExitInfo::runOnModule(Module &M) {
 		}
 
 	}
+
+	ExitPoints = exitPoints.size();
 
 	return false;
 }

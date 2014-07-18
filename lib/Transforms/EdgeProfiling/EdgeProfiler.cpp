@@ -10,6 +10,7 @@ bool llvm::EdgeProfiler::runOnModule(Module &M){
 
 
 	insertDeclarations(M);
+	insertInitInstrumentation(M);
 	insertEdgeInstrumentation(M);
 	insertExitPointInstrumentation(M);
 
@@ -30,6 +31,7 @@ void llvm::EdgeProfiler::printBasicBlocks(Module& M) {
             return;
     }
 
+    int BBid = 0;
 
 	//iterate through the functions and basic blocks
 	for(Module::iterator Fit = M.begin(), Fend = M.end(); Fit != Fend; Fit++){
@@ -38,8 +40,10 @@ void llvm::EdgeProfiler::printBasicBlocks(Module& M) {
 
 			BasicBlock* CurrentBB = BBit;
 
+			BBmap[CurrentBB] = BBid;
+
 			//ID and Name
-			File << (long)CurrentBB << "|" << BBit->getName() << "|";
+			File << BBid << "|" << BBit->getName() << "|";
 
 			//Type of terminator instruction
 			TerminatorInst *T = CurrentBB->getTerminator();
@@ -49,6 +53,8 @@ void llvm::EdgeProfiler::printBasicBlocks(Module& M) {
 			else File << "other";
 
 			File << "\n";
+
+			BBid++;
 
 		}
 	}
@@ -70,6 +76,8 @@ void llvm::EdgeProfiler::printEdges(Module& M) {
             return;
     }
 
+    int EdgeID = 0;
+
 
 	//iterate through the functions and basic blocks
 	for(Module::iterator Fit = M.begin(), Fend = M.end(); Fit != Fend; Fit++){
@@ -78,13 +86,24 @@ void llvm::EdgeProfiler::printEdges(Module& M) {
 
 			BasicBlock* CurrentBB = BBit;
 
-			//iterate through the successors of the basicblocks in the CFG
-			for(succ_iterator succ = succ_begin(CurrentBB), succEnd = succ_end(CurrentBB); succ != succEnd; succ++){
+			//iterate through the predecessors of the basicblocks in the CFG
+			for(pred_iterator pred = pred_begin(CurrentBB), predEnd = pred_end(CurrentBB); pred != predEnd; pred++){
 
-				BasicBlock* succBB = *succ;
-				File << (long)CurrentBB << "|" << (long)succBB << "\n";
+
+				BasicBlock* predBB = *pred;
+
+				if(!EdgeMap.count(make_pair(predBB, CurrentBB))) {
+
+					EdgeMap[make_pair(predBB, CurrentBB)] = EdgeID;
+
+					File << EdgeID << "|" << BBmap[predBB] << "|" << BBmap[CurrentBB] << "\n";
+
+					EdgeID++;
+
+				}
 
 			}
+
 		}
 	}
 
@@ -92,7 +111,58 @@ void llvm::EdgeProfiler::printEdges(Module& M) {
 
 }
 
+void llvm::EdgeProfiler::insertInitInstrumentation(Module &M){
+
+	Function* main = M.getFunction("main");
+	if(!main) main = M.getFunction("MAIN__"); //Fortan hack
+
+	assert(main && "Main function not found. Unable to insert instrumentation");
+
+	int numBBs = BBmap.size();
+	BBCounter = new GlobalVariable(M, ArrayType::get(Type::getInt64Ty(M.getContext()), numBBs), false, GlobalVariable::CommonLinkage, NULL, "BBCounter");
+	BBCounter->setAlignment(16);
+
+	// Constant Definitions
+	ConstantAggregateZero* const_array = ConstantAggregateZero::get(ArrayType::get(Type::getInt64Ty(M.getContext()), numBBs));
+
+	// Global Variable Definitions
+	BBCounter->setInitializer(const_array);
+
+
+	int numEdges = EdgeMap.size();
+	EdgeCounter = new GlobalVariable(M, ArrayType::get(Type::getInt64Ty(M.getContext()), numEdges), false, GlobalVariable::CommonLinkage, NULL, "EdgeCounter");
+	EdgeCounter->setAlignment(16);
+
+	// Constant Definitions
+	ConstantAggregateZero* const_array2 = ConstantAggregateZero::get(ArrayType::get(Type::getInt64Ty(M.getContext()), numEdges));
+
+	// Global Variable Definitions
+	EdgeCounter->setInitializer(const_array2);
+
+
+	EntryBlock = &main->getEntryBlock();
+
+	IRBuilder<> Builder(EntryBlock->getFirstInsertionPt());
+
+	Value* BBCounterPtr = Builder.CreateConstGEP2_32(BBCounter, 0, 0, "BBCounterPtr");
+	Value* EdgeCounterPtr = Builder.CreateConstGEP2_32(EdgeCounter, 0, 0, "EdgeCounterPtr");
+	Value* ConstNumBBs = Builder.getInt32(numBBs);
+	Value* ConstNumEdges = Builder.getInt32(numEdges);
+
+	std::vector<Value*> args;
+	args.push_back(BBCounterPtr);
+	args.push_back(ConstNumBBs);
+	args.push_back(EdgeCounterPtr);
+	args.push_back(ConstNumEdges);
+	llvm::ArrayRef<llvm::Value *> arrayArgs(args);
+	Builder.CreateCall(initBBandEdgeCounters, arrayArgs, "");
+
+}
+
 void llvm::EdgeProfiler::insertEdgeInstrumentation(Module& M) {
+
+	Value* constZero = ConstantInt::get(Type::getInt32Ty(M.getContext()), 0);
+	Value* constOne = ConstantInt::get(Type::getInt64Ty(M.getContext()), 1);
 
 	//iterate through the functions and basic blocks
 	for(Module::iterator Fit = M.begin(), Fend = M.end(); Fit != Fend; Fit++){
@@ -101,48 +171,58 @@ void llvm::EdgeProfiler::insertEdgeInstrumentation(Module& M) {
 
 			BasicBlock* CurrentBB = BBit;
 
-			Instruction* InsertionPt = CurrentBB->getFirstInsertionPt();
+			Instruction* InsertionPt;
+
+			if (CurrentBB != EntryBlock)
+				InsertionPt = CurrentBB->getFirstInsertionPt();
+			else
+				InsertionPt = CurrentBB->getTerminator();
+
 
 			IRBuilder<> Builder(InsertionPt);
 
-			Constant* CurrentBB_Const = Builder.getInt64((long)CurrentBB);
-
-
-			//FIXME: Probably there is a better place to initialize this variable.
-			if(!moduleIdentifierStr) {
-				moduleIdentifierStr = Builder.CreateGlobalStringPtr(M.getModuleIdentifier(), "moduleIdentifierStr");
-			}
+			int CurrentBBid = BBmap[CurrentBB];
 
 
 			//Insert code to count how many times an edge is visited during the execution
-			PHINode* IncomingBB = Builder.CreatePHI(Type::getInt64Ty(M.getContext()), 0, "IncomingBB");
+			PHINode* IncomingBB = Builder.CreatePHI(Type::getInt32Ty(M.getContext()), 0, "IncomingBB");
 
 			//iterate through the successors of the basicblocks in the CFG
 			for(pred_iterator pred = pred_begin(CurrentBB), predEnd = pred_end(CurrentBB); pred != predEnd; pred++){
 
 				BasicBlock* predBB = *pred;
-				Constant* predBB_Const = Builder.getInt64((long)predBB);
-				IncomingBB->addIncoming(predBB_Const, predBB);
+
+				if (IncomingBB->getBasicBlockIndex(predBB) >= 0 ) continue;
+
+				int CurrentEdge = EdgeMap[make_pair(predBB, CurrentBB)];
+				Constant* CurrentEdge_Const = Builder.getInt32(CurrentEdge);
+
+				IncomingBB->addIncoming(CurrentEdge_Const, predBB);
 
 			}
 
 			if(IncomingBB->getNumIncomingValues() > 0){
 
-				std::vector<Value*> args;
-				args.push_back(IncomingBB);
-				args.push_back(CurrentBB_Const);
-				llvm::ArrayRef<llvm::Value *> arrayArgs(args);
-				Builder.CreateCall(countVisitedEdge, arrayArgs, "");
+				std::vector<Value*> idxList;
+				idxList.push_back(constZero);
+				idxList.push_back(IncomingBB);
+				llvm::ArrayRef<llvm::Value *> IdxList(idxList);
+				Value* CurrentEdge_ptr = Builder.CreateInBoundsGEP(EdgeCounter, IdxList, "CurrentEdgePtr");
+				Value* CurrentEdgeCount = Builder.CreateLoad(CurrentEdge_ptr, "CurrentEdgeCount" );
+				Value* Inc = Builder.CreateAdd(CurrentEdgeCount, constOne, "CurrentEdgeIncCount" );
+				Builder.CreateStore(Inc, CurrentEdge_ptr);
 
 			} else {
 				IncomingBB->eraseFromParent();
 			}
 
+
+
 			//Insert code to count how many times a basic block is visited during the execution
-			std::vector<Value*> args;
-			args.push_back(CurrentBB_Const);
-			llvm::ArrayRef<llvm::Value *> arrayArgs(args);
-			Builder.CreateCall(countVisitedBlock, arrayArgs, "");
+			Value* CurrentBB_ptr = Builder.CreateConstGEP2_32(BBCounter, 0,  CurrentBBid, "CurrentBBptr");
+			Value* CurrentBBCount = Builder.CreateLoad(CurrentBB_ptr, "CurrentBBCount" );
+			Value* Inc = Builder.CreateAdd(CurrentBBCount, constOne, "CurrentBBIncCount" );
+			Builder.CreateStore(Inc, CurrentBB_ptr);
 
 		}
 	}
@@ -162,23 +242,16 @@ void llvm::EdgeProfiler::insertDeclarations(Module& M) {
 	Type* tyVoid = Type::getVoidTy(M.getContext());
 
 	std::vector<Type*> args;
-	args.push_back(Type::getInt64Ty(M.getContext()));   // BasicBlock identifier
+	args.push_back(Type::getInt64PtrTy(M.getContext()));   // BasicBlock array
+	args.push_back(Type::getInt32Ty(M.getContext()));      // BasicBlock array size
+	args.push_back(Type::getInt64PtrTy(M.getContext()));   // CFGEdge array
+	args.push_back(Type::getInt32Ty(M.getContext()));      // CFGEdge array size
 	llvm::ArrayRef<Type*> arrayArgs(args);
-	FunctionType *T1 = FunctionType::get(tyVoid, arrayArgs, true);
-	countVisitedBlock = M.getOrInsertFunction("countVisitedBlock", T1);
 
-	std::vector<Type*> args2;
-	args2.push_back(Type::getInt64Ty(M.getContext()));   // Origin BasicBlock identifier
-	args2.push_back(Type::getInt64Ty(M.getContext()));   // Destination BasicBlock identifier
-	llvm::ArrayRef<Type*> arrayArgs2(args2);
-	FunctionType *T2 = FunctionType::get(tyVoid, arrayArgs2, true);
-	countVisitedEdge = M.getOrInsertFunction("countVisitedEdge", T2);
+	FunctionType *FT = FunctionType::get(tyVoid, arrayArgs, true);
 
-	std::vector<Type*> args3;
-	args3.push_back(Type::getInt8PtrTy(M.getContext()));
-	llvm::ArrayRef<Type*> arrayArgs3(args3);
-	FunctionType *T3 = FunctionType::get(tyVoid, arrayArgs3, true);
-	flushProfilingData = M.getOrInsertFunction("flushProfilingData", T3);
+	initBBandEdgeCounters = M.getOrInsertFunction("initBBandEdgeCounters", FT);
+	flushProfilingData = M.getOrInsertFunction("flushProfilingData", FT);
 
 }
 
@@ -196,8 +269,19 @@ void llvm::EdgeProfiler::insertExitPointInstrumentation(Module& M) {
 
 		IRBuilder<> Builder(I);
 
+		int numBBs = BBmap.size();
+		int numEdges = EdgeMap.size();
+
+		Value* BBCounterPtr = Builder.CreateConstGEP2_32(BBCounter, 0, 0, "BBCounterPtr");
+		Value* EdgeCounterPtr = Builder.CreateConstGEP2_32(EdgeCounter, 0, 0, "EdgeCounterPtr");
+		Value* ConstNumBBs = Builder.getInt32(numBBs);
+		Value* ConstNumEdges = Builder.getInt32(numEdges);
+
 		std::vector<Value*> args;
-		args.push_back(moduleIdentifierStr);
+		args.push_back(BBCounterPtr);
+		args.push_back(ConstNumBBs);
+		args.push_back(EdgeCounterPtr);
+		args.push_back(ConstNumEdges);
 		llvm::ArrayRef<llvm::Value *> arrayArgs(args);
 		Builder.CreateCall(flushProfilingData, arrayArgs, "");
 

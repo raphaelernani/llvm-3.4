@@ -20,64 +20,33 @@ using namespace std;
 
 
 extern "C"{
-	void countVisitedBlock(int64_t BBPointer);
-	void countVisitedEdge(int64_t BBFrom, int64_t BBTo);
-	void flushProfilingData(char* moduleIdentifier);
-
-}
-
-class Edge{
-public:
-	int64_t from;
-	int64_t to;
-
-	Edge(int64_t from, int64_t to): from(from), to(to) {};
-	~Edge(){};
-
-    bool operator<(const Edge& other) const
-    {
-      if(from == other.from)
-      {
-        return this->to < other.to;
-      }
-      return from < other.from;
-    }
-};
-
-std::map<int64_t, int> BBCount;
-std::map<Edge, int> EdgeCount;
-
-void countVisitedBlock(int64_t BBPointer){
-
-	if(!BBCount.count(BBPointer)) BBCount[BBPointer] = 1;
-	else BBCount[BBPointer]++;
+	void initBBandEdgeCounters(int64_t *BBPointer, int numBBs, int64_t *EdgePointer, int numEdges);
+	void flushProfilingData(int64_t *BBPointer, int numBBs, int64_t *EdgePointer, int numEdges);
 
 }
 
 
-void countVisitedEdge(int64_t BBFrom, int64_t BBTo){
+void initBBandEdgeCounters(int64_t *BBPointer, int numBBs, int64_t *EdgePointer, int numEdges){
 
-	Edge key(BBFrom, BBTo);
-	if(!EdgeCount.count(key)) EdgeCount[key] = 1;
-	else EdgeCount[key]++;
+	for (int i = 0; i < numBBs; i++) BBPointer[i] = 0;
 
+	for (int i = 0; i < numEdges; i++) EdgePointer[i] = 0;
 }
 
 
-
-void flushProfilingData(char* moduleIdentifier){
+void flushProfilingData(int64_t *BBPointer, int numBBs, int64_t *EdgePointer, int numEdges){
 
 	ofstream out;
 
 	out.open ("BasicBlocks.out", std::ofstream::out);
-	for (std::map<int64_t, int>::iterator bbIt = BBCount.begin(), bbEnd = BBCount.end(); bbIt != bbEnd; bbIt++){
-		out << bbIt->first << "|" << bbIt->second << "\n";
+	for (int i = 0; i < numBBs; i++) {
+		if(BBPointer[i] > 0) out << i << "|" << BBPointer[i] << "\n";
 	}
 	out.close();
 
 	out.open ("Edges.out", std::ofstream::out);
-	for (std::map<Edge, int>::iterator eIt = EdgeCount.begin(), eEnd = EdgeCount.end(); eIt != eEnd; eIt++){
-		out << eIt->first.from << "|" << eIt->first.to << "|" << eIt->second << "\n";
+	for (int i = 0; i < numEdges; i++) {
+		if(EdgePointer[i] > 0) out << i << "|" << EdgePointer[i] << "\n";
 	}
 	out.close();
 
