@@ -187,19 +187,32 @@ void llvm::EdgeProfiler::insertEdgeInstrumentation(Module& M) {
 			//Insert code to count how many times an edge is visited during the execution
 			PHINode* IncomingBB = Builder.CreatePHI(Type::getInt32Ty(M.getContext()), 0, "IncomingBB");
 
+			unsigned pred_count = 0;
+
 			//iterate through the successors of the basicblocks in the CFG
 			for(pred_iterator pred = pred_begin(CurrentBB), predEnd = pred_end(CurrentBB); pred != predEnd; pred++){
 
 				BasicBlock* predBB = *pred;
-
-				if (IncomingBB->getBasicBlockIndex(predBB) >= 0 ) continue;
 
 				int CurrentEdge = EdgeMap[make_pair(predBB, CurrentBB)];
 				Constant* CurrentEdge_Const = Builder.getInt32(CurrentEdge);
 
 				IncomingBB->addIncoming(CurrentEdge_Const, predBB);
 
+				pred_count++;
+
 			}
+
+
+			if(IncomingBB->getNumIncomingValues() != pred_count) {
+
+				//Deu merda
+
+				errs() << *IncomingBB << "\n";
+
+
+			}
+
 
 			if(IncomingBB->getNumIncomingValues() > 0){
 
