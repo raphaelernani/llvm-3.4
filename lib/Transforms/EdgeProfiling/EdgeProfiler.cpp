@@ -43,7 +43,7 @@ void llvm::EdgeProfiler::printBasicBlocks(Module& M) {
 			BBmap[CurrentBB] = BBid;
 
 			//ID and Name
-			File << BBid << "|" << BBit->getName() << "|";
+			File << BBid << "|" << Fit->getName() << "|" << BBit->getName() << "|";
 
 			//Type of terminator instruction
 			TerminatorInst *T = CurrentBB->getTerminator();
