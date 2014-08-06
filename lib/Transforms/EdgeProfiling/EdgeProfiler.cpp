@@ -174,7 +174,7 @@ void llvm::EdgeProfiler::insertEdgeInstrumentation(Module& M) {
 			Instruction* InsertionPt;
 
 			if (CurrentBB != EntryBlock)
-				InsertionPt = CurrentBB->getFirstInsertionPt();
+				InsertionPt = CurrentBB->begin();
 			else
 				InsertionPt = CurrentBB->getTerminator();
 
@@ -204,13 +204,9 @@ void llvm::EdgeProfiler::insertEdgeInstrumentation(Module& M) {
 			}
 
 
-			if(IncomingBB->getNumIncomingValues() != pred_count) {
-
-				//Deu merda
-
-				errs() << *IncomingBB << "\n";
-
-
+			if (CurrentBB != EntryBlock) {
+				InsertionPt = CurrentBB->getFirstInsertionPt();
+				Builder.SetInsertPoint(InsertionPt);
 			}
 
 
